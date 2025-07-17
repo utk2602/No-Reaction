@@ -36,7 +36,7 @@ export const render = (vdom: VNode | string, container: HTMLElement): void => {
     container.appendChild(domelement);
 };
 
-export const createDom = (vdom: VNode | string): Node => {
+export const createDom = (vdom: VNode | string | number): Node => {
     if (typeof vdom === 'string' || typeof vdom === 'number') {
         return document.createTextNode(String(vdom));
     }
@@ -127,4 +127,49 @@ export const updateProps = (
             }
         }
     });
+};
+
+export const updateElement = (
+    parent: HTMLElement,
+    newNode:VNode |string|number|null,
+    oldNode:VNode |string|number|null,
+    index=0
+): void=>{
+    const childNodes = parent.childNodes;
+    const targetNode = childNodes[index];
+
+    if(oldNode === null){
+        if(newNode !== null){
+            parent.appendChild(createDom(newNode));
+        }
+    }
+    else if(newNode === null){
+        if(index < childNodes.length && targetNode){
+            parent.removeChild(targetNode);
+        }
+    }else if(
+          (typeof newNode !== typeof oldNode) ||
+    ((typeof newNode === 'string' || typeof newNode === 'number') && newNode !== oldNode) ||
+    (typeof newNode === 'object' && typeof oldNode === 'object' && newNode.type !== oldNode.type)
+    ){
+        if(index< childNodes.length  && targetNode){
+            parent.replaceChild(createDom(newNode), targetNode);
+        }
+    }
+    else if (typeof newNode === 'object' && typeof oldNode === 'object' && newNode.type && targetNode) {
+    // Update props if types are the same and it's an element node
+    updateProps(targetNode as HTMLElement, newNode.props, oldNode.props);
+
+    // Recursively diff children
+    const newLength = newNode.children.length;
+    const oldLength = oldNode.children.length;
+    for (let i = 0; i < newLength || i < oldLength; i++) {
+      updateElement(
+        targetNode as HTMLElement,
+        newNode.children[i] || null,
+        oldNode.children[i] || null,
+        i
+      );
+    }
+  }
 };
