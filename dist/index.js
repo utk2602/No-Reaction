@@ -2098,14 +2098,14 @@ import path from "path";
 import { fileURLToPath } from "url";
 var __filename2 = fileURLToPath(import.meta.url);
 var __dirname2 = path.dirname(__filename2);
-console.log("Setting up your Unreacted project...");
+console.log("Setting up your No reactionproject...");
 var projectName = process.argv[2];
 if (!projectName) {
   console.error("Please specify the project directory:");
-  console.log("  npx unreacted <project-directory>");
+  console.log("  npx No reaction<project-directory>");
   console.log();
   console.log("For example:");
-  console.log("  npx unreacted my-unreacted-app");
+  console.log("  npx No reactionmy-unreacted-app");
   process.exit(1);
 }
 var projectPath = path.resolve(process.cwd(), projectName);
@@ -2140,7 +2140,7 @@ try {
   import_fs_extra.default.copySync(templateDir, projectPath, { overwrite: true });
   console.log("Copied template files.");
   console.log(`
-Success! Your Unreacted project "${projectNameBase}" is ready.`);
+Success! Your No reactionproject "${projectNameBase}" is ready.`);
   console.log(`
 To get started:`);
   if (!isCurrentDirectory) {
