@@ -1,13 +1,13 @@
 // Define the structure for a virtual DOM element
 export interface VDomNode {
-  type: string;
+  type: string | ((props?: Record<string, any>) => VDomNode | string | number | null);
   props: Record<string, any>; // Simple props handling, can be enhanced
   children: (VDomNode | string | number)[];
 }
 
 // Create a virtual DOM element
 export const createElement = (
-  type: string,
+  type: string | ((props?: Record<string, any>) => VDomNode | string | number | null),
   props: Record<string, any> = {},
   ...children: (VDomNode | string | number)[]
 ): VDomNode => {
@@ -23,8 +23,15 @@ export const render = (vdom: VDomNode | string | number, container: HTMLElement)
     return;
   }
 
+  // If the vdom is a functional component, resolve it
+  if (typeof vdom.type === 'function') {
+    const resolved = vdom.type({ ...(vdom.props || {}), children: vdom.children });
+    render(resolved as any, container);
+    return;
+  }
+
   // Create a DOM element from the vDOM type
-  const domElement = document.createElement(vdom.type);
+  const domElement = document.createElement(vdom.type as string);
 
   // Assign props
   updateProps(domElement, vdom.props);
@@ -39,7 +46,13 @@ export const createDom = (vdom: VDomNode | string | number): Node => {
   if (typeof vdom === 'string' || typeof vdom === 'number') {
     return document.createTextNode(String(vdom));
   }
-  const dom = document.createElement(vdom.type);
+  // If it's a functional component, resolve it first
+  if (typeof vdom.type === 'function') {
+    const resolved = vdom.type({ ...(vdom.props || {}), children: vdom.children });
+    return createDom(resolved as any);
+  }
+
+  const dom = document.createElement(vdom.type as string);
   updateProps(dom, vdom.props);
 
   vdom.children.forEach(child => {
@@ -145,6 +158,14 @@ export const updateElement = (
   const childNodes = parent.childNodes;
   const targetNode = childNodes[index] as HTMLElement; // Cast for property access
 
+  // Resolve functional components if present
+  if (newNode && typeof newNode === 'object' && typeof (newNode as VDomNode).type === 'function') {
+    newNode = (newNode as VDomNode).type({ ...((newNode as VDomNode).props || {}), children: (newNode as VDomNode).children });
+  }
+  if (oldNode && typeof oldNode === 'object' && typeof (oldNode as VDomNode).type === 'function') {
+    oldNode = (oldNode as VDomNode).type({ ...((oldNode as VDomNode).props || {}), children: (oldNode as VDomNode).children });
+  }
+
   if (oldNode === null) {
     // Add new node if oldNode doesn't exist
     if (newNode !== null) {
@@ -158,7 +179,7 @@ export const updateElement = (
   } else if (
     (typeof newNode !== typeof oldNode) ||
     ((typeof newNode === 'string' || typeof newNode === 'number') && newNode !== oldNode) ||
-    (typeof newNode === 'object' && typeof oldNode === 'object' && newNode.type !== oldNode.type)
+    (typeof newNode === 'object' && typeof oldNode === 'object' && (newNode as VDomNode).type !== (oldNode as VDomNode).type)
   ) {
     // Replace node if types are different or text content differs
      if (index < childNodes.length) {

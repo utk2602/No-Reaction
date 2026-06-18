@@ -2,103 +2,179 @@ import type { VDomNode } from './vdom'; // Assuming VDomNode is defined in vdom.
 
 // Define the structure for the component context
 export interface ComponentContext {
-  hooks: any[];
-  component: () => VDomNode;
-  domNode: HTMLElement | null;
-  vDom: VDomNode | null;
-  rerender: () => void;
-}
+  import type { VDomNode } from './vdom';
 
-// Globals to track the current component and hook index
-let currentComponent: ComponentContext | null = null;
-let hookIndex = 0;
-
-// useState hook
-export const useState = <T>(initialValue: T): [T, (newValue: T) => void] => {
-  if (!currentComponent) {
-    throw new Error("useState must be called within a component context");
+  // Define the structure for the component context
+  export interface ComponentContext {
+    hooks: HookEntry[];
+    component: () => VDomNode | string | number | null;
+    domNode: HTMLElement | null;
+    vDom: VDomNode | string | number | null;
+    rerender: () => void;
   }
 
-  // Capture the component context *for this specific hook call*
-  const componentForHook = currentComponent;
-  const hooks = componentForHook.hooks;
-  const currentIndex = hookIndex;
+  type EffectCleanup = (() => void) | undefined;
 
-  if (hooks[currentIndex] === undefined) {
-    hooks[currentIndex] = initialValue;
+  type HookEntry =
+    | { type: 'state'; value: any }
+    | { type: 'effect'; deps?: any[]; cleanup?: EffectCleanup }
+    | { type: 'ref'; current: any }
+    | { type: 'memo'; value: any; deps?: any[] };
+
+  // Globals to track the current component and hook index
+  let currentComponent: ComponentContext | null = null;
+  let hookIndex = 0;
+
+  // Internal helper to get or create a hook slot
+  function getHookSlot(): HookEntry | undefined {
+    if (!currentComponent) throw new Error('Hooks must be called during render');
+    return currentComponent.hooks[hookIndex];
   }
 
-  // The setState function closes over componentForHook and currentIndex
-  const setState = (newValue: T) => {
-      // No need to check componentForHook here if the outer check passed,
-      // but we *must* use componentForHook, not the global currentComponent.
+  function setHookSlot(slot: HookEntry) {
+    if (!currentComponent) throw new Error('Hooks must be called during render');
+    currentComponent.hooks[hookIndex] = slot;
+  }
 
-      // Check if the state actually changed using the captured context's hooks
-      if (componentForHook.hooks[currentIndex] !== newValue) {
-        componentForHook.hooks[currentIndex] = newValue;
-        // Trigger re-render using the captured context's rerender function
-        componentForHook.rerender();
+  // useState hook
+  export const useState = <T>(initialValue: T): [T, (newValue: T | ((prev: T) => T)) => void] => {
+    if (!currentComponent) throw new Error('useState must be called within a component render');
+
+    const slot = getHookSlot();
+    if (!slot || slot.type !== 'state') {
+      // initialize
+      setHookSlot({ type: 'state', value: initialValue });
+    }
+
+    const currentSlot = getHookSlot() as { type: 'state'; value: T };
+
+    const setState = (newValue: T | ((prev: T) => T)) => {
+      const prev = currentSlot.value as T;
+      const resolved = typeof newValue === 'function' ? (newValue as Function)(prev) : newValue;
+      if (resolved !== prev) {
+        currentSlot.value = resolved;
+        // schedule rerender
+        // capture context's rerender from the stored component (we can access via currentComponent variable only during render setup)
+        // To avoid relying on stale currentComponent, find a way to schedule after render: use stored rerender on component in closure
+        const ctx = currentComponent as ComponentContext | null;
+        if (ctx && typeof ctx.rerender === 'function') ctx.rerender();
       }
+    };
+
+    hookIndex++;
+    return [currentSlot.value as T, setState];
   };
 
-  // Increment global hookIndex for the next hook call within the *same* component render
-  hookIndex++;
-  return [hooks[currentIndex] as T, setState];
-};
+  // useRef hook
+  export const useRef = <T>(initialValue: T) => {
+    if (!currentComponent) throw new Error('useRef must be called within a component render');
+    const slot = getHookSlot();
+    if (!slot || slot.type !== 'ref') {
+      setHookSlot({ type: 'ref', current: initialValue });
+    }
+    const current = getHookSlot() as { type: 'ref'; current: T };
+    hookIndex++;
+    return current;
+  };
 
-// useEffect hook
-export const useEffect = (effect: () => (void | (() => void)), deps?: any[]): void => {
-  if (!currentComponent) {
-    throw new Error("useEffect must be called within a component context");
-  }
+  // useMemo hook
+  export const useMemo = <T>(factory: () => T, deps?: any[]): T => {
+    if (!currentComponent) throw new Error('useMemo must be called within a component render');
+    const slot = getHookSlot();
+    if (!slot || slot.type !== 'memo') {
+      const value = factory();
+      setHookSlot({ type: 'memo', value, deps });
+      hookIndex++;
+      return value;
+    }
+    const memo = slot as { type: 'memo'; value: T; deps?: any[] };
+    const oldDeps = memo.deps;
+    let changed = false;
+    if (!deps) changed = true;
+    else if (!oldDeps) changed = true;
+    else if (deps.length !== oldDeps.length) changed = true;
+    else {
+      for (let i = 0; i < deps.length; i++) if (deps[i] !== oldDeps[i]) { changed = true; break; }
+    }
+    if (changed) {
+      memo.value = factory();
+      memo.deps = deps;
+    }
+    hookIndex++;
+    return memo.value;
+  };
 
-  const hooks = currentComponent.hooks;
-  const oldDeps = hooks[hookIndex] as any[] | undefined;
-  let hasChanged = true; // Assume dependencies have changed initially
+  // useEffect hook
+  export const useEffect = (effect: () => (void | (() => void)), deps?: any[]): void => {
+    if (!currentComponent) throw new Error('useEffect must be called within a component render');
 
-  if (deps && oldDeps) {
-    // If dependencies are provided, check if they have changed
-    hasChanged = deps.length !== oldDeps.length || deps.some((dep, i) => dep !== oldDeps[i]);
-  } else if (!deps && !oldDeps) {
-    // If no dependencies provided ever, it should only run once (like componentDidMount)
-    // But if called again without deps, it should run again. The check `!oldDeps` handles the first run.
-    hasChanged = !oldDeps; // Will be true only on the first render
-  }
+    const slot = getHookSlot();
 
-  if (hasChanged) {
-    hooks[hookIndex] = deps; // Store the new dependencies
-    // Run the effect after the component has rendered (using setTimeout)
-    // Store the cleanup function if the effect returns one
-    setTimeout(() => {
-      const cleanup = effect();
-      if (typeof cleanup === 'function') {
-        // We need a way to store and call cleanup functions before the next effect runs
-        // This simple implementation doesn't handle cleanup properly yet.
-        // A more robust solution would involve storing cleanup functions in the component context.
-        // console.log("Effect cleanup function registered but not executed.");
-        hooks[currentIndex + 0.5] = cleanup; // Store cleanup function
+    if (!slot || slot.type !== 'effect') {
+      // first time: store deps and schedule effect
+      setHookSlot({ type: 'effect', deps, cleanup: undefined });
+      // schedule effect to run after render
+      scheduleEffect(hookIndex, effect);
+    } else {
+      const old = slot as { type: 'effect'; deps?: any[]; cleanup?: EffectCleanup };
+      const oldDeps = old.deps;
+      let changed = false;
+      if (!deps) changed = true; // if no deps provided, always run (componentDidMount-like on first render; React runs every render with no deps — but educational choice)
+      else if (!oldDeps) changed = true;
+      else if (deps.length !== oldDeps.length) changed = true;
+      else {
+        for (let i = 0; i < deps.length; i++) if (deps[i] !== oldDeps[i]) { changed = true; break; }
       }
-    }, 0);
+      if (changed) {
+        // call cleanup immediately before scheduling new effect
+        if (typeof old.cleanup === 'function') {
+          try { old.cleanup(); } catch (e) { console.error('Error during effect cleanup', e); }
+        }
+        old.deps = deps;
+        old.cleanup = undefined;
+        scheduleEffect(hookIndex, effect);
+      }
+    }
+
+    hookIndex++;
+  };
+
+  // Effect scheduling: store pending effects per component and run them after render
+  const pendingEffects = new Map<ComponentContext, Array<{ index: number; effect: () => (void | (() => void)) }>>();
+
+  function scheduleEffect(index: number, effect: () => (void | (() => void))) {
+    if (!currentComponent) return;
+    let list = pendingEffects.get(currentComponent);
+    if (!list) { list = []; pendingEffects.set(currentComponent, list); }
+    list.push({ index, effect });
   }
-    const currentIndex = hookIndex;
 
-  // Clean up the previous effect if dependencies changed or component unmounts
-  const cleanup = hooks[currentIndex + 0.5] as (() => void) | undefined;
-  if (hasChanged && typeof cleanup === 'function') {
-      cleanup();
-      hooks[currentIndex + 0.5] = undefined; // Clear cleanup function
+  // Called by renderer after a component finishes rendering
+  export function runEffectsForComponent(component: ComponentContext) {
+    const list = pendingEffects.get(component);
+    if (!list) return;
+    // Run in order
+    for (const item of list) {
+      const slot = component.hooks[item.index] as { type: 'effect'; cleanup?: EffectCleanup } | undefined;
+      try {
+        const cleanup = item.effect();
+        if (typeof cleanup === 'function') {
+          if (slot) slot.cleanup = cleanup;
+        }
+      } catch (e) {
+        console.error('Error running effect', e);
+      }
+    }
+    pendingEffects.delete(component);
   }
 
-  hookIndex++; // Increment for the next hook call
-};
+  // Function to set the current component context (to be used in rendering)
+  export const setCurrentComponentContext = (component: ComponentContext | null): void => {
+    currentComponent = component;
+    hookIndex = 0; // Reset hook index for the new component rendering cycle
+  };
 
-// Function to set the current component context (to be used in rendering)
-export const setCurrentComponentContext = (component: ComponentContext | null): void => {
-  currentComponent = component;
-  hookIndex = 0; // Reset hook index for the new component rendering cycle
-};
-
-// Getter for the current component context (might be useful for debugging or advanced features)
-export const getCurrentComponentContext = (): ComponentContext | null => {
-  return currentComponent;
-};
+  // Getter for the current component context (might be useful for debugging or advanced features)
+  export const getCurrentComponentContext = (): ComponentContext | null => {
+    return currentComponent;
+  };

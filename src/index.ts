@@ -4,7 +4,7 @@
 export { createElement, render, updateElement } from './vdom';
 
 // Export hooks
-export { useState, useEffect } from './hooks';
+export { useState, useEffect, useRef, useMemo } from './hooks';
 
 // Export the component renderer
 export { renderComponent } from './renderer';

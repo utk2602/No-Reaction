@@ -1,6 +1,6 @@
 import { updateElement, createDom } from './vdom';
 import type { VDomNode } from './vdom';
-import { setCurrentComponentContext } from './hooks';
+import { setCurrentComponentContext, runEffectsForComponent } from './hooks';
 import type { ComponentContext } from './hooks'; // Assuming ComponentContext is exported from hooks.ts
 
 // Type for a component function
@@ -53,6 +53,13 @@ export const renderComponent = (Component: ComponentFunction, container: HTMLEle
 
   // Update the component context with the latest vDOM
   componentContext.vDom = newVDom;
+
+  // Run any pending effects scheduled during render for this component
+  try {
+    runEffectsForComponent(componentContext);
+  } catch (e) {
+    console.error('Error running effects for component', e);
+  }
 
   // Reset the current component context after rendering
   setCurrentComponentContext(null);
